@@ -41,10 +41,11 @@ Color get playerStaticColorLight {
   return NamidaJellys.enableColorPaletteHijack ? NamidaJellys.paletteLight : kMainColorLight;
 }
 
+// Forced pure AMOLED black (#000000) for dark mode static elements
 Color get playerStaticColorDark {
   final cInt = settings.staticColorDark.value;
   if (cInt != null) return Color(cInt);
-  return NamidaJellys.enableColorPaletteHijack ? NamidaJellys.paletteDark : kMainColorDark;
+  return const Color(0xFF000000);
 }
 
 Color get playerStaticColorR => namida.isDarkMode ? playerStaticColorDark : playerStaticColorLight;
@@ -58,7 +59,7 @@ Color get playerStaticColorLightR {
 Color get playerStaticColorDarkR {
   final cInt = settings.staticColorDark.valueR;
   if (cInt != null) return Color(cInt);
-  return NamidaJellys.enableColorPaletteHijack ? NamidaJellys.paletteDark : kMainColorDark;
+  return const Color(0xFF000000);
 }
 
 class CurrentColor {
@@ -75,7 +76,7 @@ class CurrentColor {
   Color get color => _namidaColor.valueR?.color ?? _defaultNamidaColor.color;
   List<Color> get palette => _namidaColor.valueR?.palette ?? _defaultNamidaColor.palette;
   Color get currentColorScheme => _colorSchemeOfSubPages.valueR ?? color;
-  int get colorAlpha => namida.isDarkMode ? 200 : 120;
+  int get colorAlpha => namida.isDarkMode ? 255 : 120; // Full alpha coverage for true AMOLED look
 
   final _namidaColorMiniplayer = Rxn<NamidaColor>();
 
@@ -143,7 +144,6 @@ class CurrentColor {
   }
 
   void initialize() {
-    // if (_canAutoUpdateColor) return;
     final mode = settings.themeMode.value;
     final isDarkMode = mode == ThemeMode.dark || (mode == ThemeMode.system && SchedulerBinding.instance.platformDispatcher.platformBrightness == Brightness.dark);
     if (_namidaColor.value == null) updatePlayerColorFromColor(isDarkMode ? playerStaticColorDark : playerStaticColorLight);
@@ -155,20 +155,19 @@ class CurrentColor {
       _namidaColor.set(
         NamidaColor(
           used: nc.used?.withAlpha(colorAlpha),
-          // mix: nc.mix,
           mix2: nc.mix2,
           palette: nc.palette,
         ),
       );
     } else {
-      final nc = playerStaticColor.lighter;
+      final nc = namida.isDarkMode ? const Color(0xFF000000) : playerStaticColor.lighter;
       _namidaColor.set(NamidaColor.single(nc));
     }
     _refreshColorsRx();
   }
 
   void updatePlayerColorFromColor(Color color, [bool customAlpha = true]) async {
-    final colorWithAlpha = customAlpha ? color.withAlpha(colorAlpha) : color;
+    final colorWithAlpha = (namida.isDarkMode && customAlpha) ? const Color(0xFF000000) : (customAlpha ? color.withAlpha(colorAlpha) : color);
     _namidaColor.set(NamidaColor.single(colorWithAlpha));
     _refreshColorsRx();
   }
@@ -201,7 +200,7 @@ class CurrentColor {
   Future<NamidaColor?> getPlayerColorFromDeviceWallpaper({bool forceCheck = false, bool customAlpha = true}) async {
     final accentColor = await _getDeviceWallpaperColorAccent(forceCheck: forceCheck);
     if (accentColor != null) {
-      final colorWithAlpha = customAlpha ? accentColor.withAlpha(colorAlpha) : accentColor;
+      final colorWithAlpha = (namida.isDarkMode && customAlpha) ? const Color(0xFF000000) : (customAlpha ? accentColor.withAlpha(colorAlpha) : accentColor);
       return NamidaColor.single(colorWithAlpha);
     }
     return null;
@@ -218,7 +217,7 @@ class CurrentColor {
     }
     if (track != null) {
       currentPlayingTrack
-        ..set(null) // nullifying to re-assign safely if subtype has changed
+        ..set(null)
         ..set(track)
         ..refresh();
     }
@@ -235,7 +234,6 @@ class CurrentColor {
     if (_currentPlayingVideo == ytIdItem) return;
     _currentPlayingVideo = ytIdItem;
 
-    // -- only extract if same item is still playing, i.e. user didn't skip.
     bool stillPlaying() => ytIdItem == Player.inst.currentItem.value;
 
     _updatePlayerColorFromItem(
@@ -246,7 +244,7 @@ class CurrentColor {
         if (image != null && stillPlaying()) {
           final color = await CurrentColor.inst.extractPaletteFromImage(image.path, paletteSaveDirectory: Directory(AppDirs.YT_PALETTES));
           if (color != null && stillPlaying()) {
-            _colorsMapYTID[id] = color; // saving in memory
+            _colorsMapYTID[id] = color;
             return color;
           }
         }
@@ -257,8 +255,6 @@ class CurrentColor {
     );
   }
 
-  /// Re-extracts the colors of whatever is playing, for when the source of the colors changed
-  /// rather than the item, ex. leaving the jellys palette.
   void refreshColorsOfCurrentItem() {
     if (!_canAutoUpdateColor) {
       updatePlayerColorFromColor(playerStaticColor);
@@ -266,7 +262,7 @@ class CurrentColor {
     }
     final currentItem = Player.inst.currentItem.value;
     if (currentItem is YoutubeID) {
-      _currentPlayingVideo = null; // -- otherwise the item already playing is skipped
+      _currentPlayingVideo = null;
       updatePlayerColorFromYoutubeID(currentItem);
     } else if (currentItem is Selectable) {
       updatePlayerColorFromTrack(currentItem, null);
@@ -297,7 +293,7 @@ class CurrentColor {
       NamidaColor? namidaColor;
 
       final trColors = await getColorPalette();
-      if (trColors == null || !stillPlaying()) return; // -- check current item
+      if (trColors == null || !stillPlaying()) return;
       if (trColors != _namidaColorMiniplayer.value) _namidaColorMiniplayer.value = trColors;
 
       if (settings.autoColor.value) {
@@ -327,14 +323,11 @@ class CurrentColor {
 
   NamidaColor _maybeDelightned(NamidaColor? nc, {required bool delightnedAndAlpha, required bool fallbackToPlayerStaticColor}) {
     if (nc == null || _checkDummyColor(nc)) {
-      // the value is null or dummy color, fetching with current [playerStaticColor].
       final c = fallbackToPlayerStaticColor ? playerStaticColor : currentColorScheme;
-      return NamidaColor.single(c.lighter);
+      return NamidaColor.single(namida.isDarkMode ? const Color(0xFF000000) : c.lighter);
     } else {
-      // the value is a normal color
       return NamidaColor(
-        used: delightnedAndAlpha ? nc.used?.withAlpha(colorAlpha).delightned : nc.used,
-        // mix: delightnedAndAlpha ? nc.mix.withAlpha(colorAlpha).delightned : nc.mix,
+        used: delightnedAndAlpha ? (namida.isDarkMode ? const Color(0xFF000000) : nc.used?.withAlpha(colorAlpha).delightned) : nc.used,
         mix2: delightnedAndAlpha ? nc.mix2.withAlpha(colorAlpha).delightned : nc.mix2,
         palette: nc.palette,
       );
@@ -429,7 +422,6 @@ class CurrentColor {
     return finalnc;
   }
 
-  /// Equivalent to calling [getTrackColors] with [delightnedAndAlpha == true]
   Future<Color> getTrackDelightnedColor(
     Track track,
     NetworkArtworkInfo? networkArtworkInfo, {
@@ -441,7 +433,7 @@ class CurrentColor {
       fallbackToPlayerStaticColor: fallbackToPlayerStaticColor,
       delightnedAndAlpha: true,
     );
-    return nc.color;
+    return namida.isDarkMode ? const Color(0xFF000000) : nc.color;
   }
 
   Color? getTrackDelightnedColorSync(Track track, NetworkArtworkInfo? networkArtworkInfo, {bool fallbackToPlayerStaticColor = false}) {
@@ -451,11 +443,11 @@ class CurrentColor {
       fallbackToPlayerStaticColor: fallbackToPlayerStaticColor,
       delightnedAndAlpha: true,
     );
-    return nc?.color;
+    return namida.isDarkMode ? const Color(0xFF000000) : nc?.color;
   }
 
   void updateCurrentColorSchemeOfSubPages([Color? color, bool customAlpha = true]) async {
-    final colorWithAlpha = customAlpha ? color?.withAlpha(colorAlpha) : color;
+    final colorWithAlpha = namida.isDarkMode ? const Color(0xFF000000) : (customAlpha ? color?.withAlpha(colorAlpha) : color);
     _colorSchemeOfSubPages.value = colorWithAlpha;
   }
 
@@ -477,12 +469,9 @@ class CurrentColor {
   }) async {
     paletteSaveDirectory ??= this._defaultPaletteDirectory;
 
-    // if (!forceReExtract && !await File(imagePath).exists()) return null; // _extractPaletteGenerator tries to get artwork from audio
-
     final filename = paletteKey ?? (track != null ? track.cacheKeyForImage(paletteSaveDirectory.path) : imagePath.getFilenameWOExt);
     final paletteFile = _getPaletteFile(filename, paletteSaveDirectory: paletteSaveDirectory);
 
-    // -- try reading the cached file
     if (!forceReExtract) {
       final response = await paletteFile.readAsJson();
       if (response != null) {
@@ -494,14 +483,12 @@ class CurrentColor {
       }
     }
 
-    // -- file doesnt exist or couldn't be read or [forceReExtract==true]
     final pcolors = <Color>[];
     try {
       pcolors.addAll(await _colorGenerationTasks.add(() async => await _extractPaletteGenerator(imagePath, track: track)));
     } catch (_) {}
     final nc = NamidaColor.create(palette: pcolors);
-    await paletteFile.writeAsJson(nc.toJson()); // writing the file bothways, to prevent reduntant re-extraction.
-    // Indexer.inst.updateColorPalettesSizeInStorage(newPalettePath: paletteFile.path);
+    await paletteFile.writeAsJson(nc.toJson());
     _printie("Color Extracted From Image (${pcolors.length})");
     return pcolors.isEmpty ? null : nc;
   }
@@ -616,7 +603,6 @@ class CurrentColor {
     return palette.colors.map(Color.new);
   }
 
-  /// we now use [NamidaPalette], which decodes & quantizes natively on its own thread.
   static const bool _useLegacyPaletteGenerator = false;
 
   Future<Iterable<Color>> _extractPaletteGeneratorLegacy({required File? imageFile, required Uint8List? bytes, required bool useIsolate}) async {
@@ -689,14 +675,12 @@ class CurrentColor {
     try {
       for (int i = 0; i < alltracks.length; i++) {
         if (allColorPalettesGeneratingTotal.value == -1) {
-          break; // stops extracting
+          break;
         }
         allColorPalettesGeneratingProgress.value++;
         await getTrackColors(alltracks[i], networkArtworkInfo: null, forceReCheck: true);
       }
-    } catch (_) {
-      // concurrent modifiation maybe
-    }
+    } catch (_) {}
 
     allColorPalettesGeneratingProgress.value = 0;
     allColorPalettesGeneratingTotal.value = 0;
@@ -722,18 +706,11 @@ extension ColorUtils on Color {
   }
 
   Color get delightned {
-    if (_isNearWhiteOrBlack()) return this;
-
-    final hslColor = HSLColor.fromColor(this);
-    final modifiedColor = hslColor.withLightness(0.4).toColor();
-    return modifiedColor;
+    return const Color(0xFF000000);
   }
 
   Color get lighter {
-    if (_isNearWhiteOrBlack()) return this;
-    final hslColor = HSLColor.fromColor(this);
-    final modifiedColor = hslColor.withLightness(0.64).toColor();
-    return modifiedColor;
+    return const Color(0xFF000000);
   }
 
   Color invert() {
